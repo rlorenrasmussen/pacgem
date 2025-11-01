@@ -1,9 +1,10 @@
 #!/usr/bin/env ruby
 
 require 'optparse'
+require 'net/http'
 
 module Pacgem
-  VERSION = '0.9.12'
+  VERSION = '0.9.13'
 
   module Util
     def which?(name)
@@ -227,11 +228,25 @@ module Pacgem
       "#{ruby_package}-#{gemname.downcase.sub(/^ruby-/, '').tr('_', '-')}"
     end
 
+    def save_file(filename,stream)
+      File.open(filename,'w') do |file|
+        file.write(stream)
+      end
+    end
+
     def download
       gemfile = "#{gemname}-#{version}.gem"
-      open("#{uri}gems/#{gemfile}") do |i|
-        File.open(gemfile, 'w') do |o|
-          FileUtils.copy_stream(i, o)
+      url_string = "#{uri}gems/#{gemfile}"
+      gemserver_uri = URI(url_string)
+      Net::HTTP.start(gemserver_uri.host, gemserver_uri.port, use_ssl: gemserver_uri.scheme == 'https') do |http|
+        request = Net::HTTP::Get.new(gemserver_uri)
+        http.request(request) do |response|
+          if response.code == '200'
+            save_file(gemfile,response.read_body)
+            puts "Downloaded: #{gemfile}"
+          else
+            puts "Failed to download: HTTP #{response.code}"
+          end
         end
       end
       gemfile
@@ -323,9 +338,9 @@ module Pacgem
       logger.msg "Installing #{pkgfile} with pacman..."
       pacman_parse('-Qv') =~ /^Lock File\s+:\s+(.*)$/
       lockfile = $1
-      if File.exists?(lockfile)
+      if File.exist?(lockfile)
         logger.msg2 'Pacman is currently in use, please wait.'
-        sleep 1 while File.exists?(lockfile)
+        sleep 1 while File.exist?(lockfile)
       end
       cmd = "pacman --as#{explicit? ? 'explicit' : 'deps'} -U #{pkgfile.shellescape}"
       if which?('sudo')
